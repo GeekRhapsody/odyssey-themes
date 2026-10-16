@@ -1,6 +1,4 @@
 {
-  // The themes Odyssey Launcher's theme downloader offers (Settings, Download themes). See README.md.
-  // Format 1: comments and trailing commas are allowed. Each theme pins the commit the list's owner tested.
   "format": 1,
   "latest_app_version": "0.16.0",
   "themes": [
