@@ -8,7 +8,6 @@
       "author": "Claudio Filipe",
       "description": "The PS Vita's home screen: every system a glossy white pebble with its logo on its front, over a bright blue background, with deep blue menus.",
       "url": "https://github.com/GeekRhapsody/odyssey-vita.git",
-      "commit": "9f7cf1e413790e784c4d909a2be66ba5704f3fac",
       "version": "1.0.0",
       "new": true,
       "covers": { "system_cards": 171, "templates": 0, "menus": true, "card_videos": false, "game_videos": false },

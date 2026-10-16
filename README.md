@@ -1,6 +1,6 @@
 # Odyssey Launcher themes
 
-This is the list of themes [Odyssey Launcher](https://github.com/GeekRhapsody/OdysseyLauncher)'s theme downloader offers (Settings, Look, **Download themes**). The launcher clones this repository when the downloader opens and reads `themes.json` and the screenshots. Each theme is a git repository of its own, which the launcher clones into the user's `themes/` folder at the commit the list names.
+This is the list of themes [Odyssey Launcher](https://github.com/GeekRhapsody/OdysseyLauncher)'s theme downloader offers (Settings, Look, **Download themes**). The launcher clones this repository when the downloader opens and reads `themes.json` and the screenshots. Each theme is a git repository of its own, which the launcher clones into the user's `themes/` folder from its default branch, and updates from it when the user asks, as ES-DE does.
 
 The launcher's owner tests every theme before it's listed, and moderates the list: a theme is added, updated or removed only by a change here.
 
@@ -29,7 +29,7 @@ The launcher's owner tests every theme before it's listed, and moderates the lis
 
 Open an issue or a pull request with:
 
-- the repository's https URL, and the commit to list: the full 40-character sha, not a branch or a tag
+- the repository's https URL: users get its default branch
 - the id: the folder it's installed in, in lower-case letters, digits, `_` and `-` (`neon-arcade`), and not a built-in theme's (`memory-card`, `console`, `slab`)
 - its name, your name as the author, and a sentence or two of description
 - the oldest launcher version it needs, if it uses something new (`min_app_version`): an older launcher shows the theme but won't install it
@@ -46,7 +46,6 @@ An entry looks like this:
   "author": "Your Name",
   "description": "Arcade cabinets for every system, under neon light.",
   "url": "https://github.com/your-name/odyssey-neon-arcade.git",
-  "commit": "0123456789abcdef0123456789abcdef01234567",
   "version": "1.0.0",
   "min_app_version": "0.16.0",
   "new": true,
@@ -62,24 +61,21 @@ An entry looks like this:
 |---|---|
 | `id` | The folder it's installed in, `themes/<id>/`. Required. |
 | `name`, `author`, `description` | Shown in the list and the details. `name` is required. |
-| `url` | The theme's git repository, https. Required. |
-| `commit` | The commit users get: the one the owner tested. Required. |
+| `url` | The theme's git repository, https: users get its default branch. Required. |
 | `version` | Shown in the details only. |
 | `min_app_version` | The oldest launcher that can use it. |
 | `new` | Shown as new. |
 | `deprecated` | Shown faded, as leaving the list soon. |
-| `covers` | What it brings, as `inspect-theme --json` prints it: system cards and logos, templates, its own menus, card and game videos. |
+| `covers` | Optional: what it brings, as `inspect-theme --json` prints it: system cards and logos, templates, its own menus, card and game videos. Without it, the theme's details just don't say. |
 | `screenshots` | Each one's `image` (a path in this repository) and `caption`. |
 
 ## What the owner does
 
-Before a theme is listed, the owner installs it from the list, tries it in the launcher, runs `inspect-theme`, and sets its `covers` from what that prints. A theme can be turned down, or listed later, for any reason; the owner says why in the issue or pull request.
+Before a theme is listed, the owner installs it from the list, tries it in the launcher, and runs `inspect-theme`. Only the owner accepts pull requests to this list. A theme can be turned down, or listed later, for any reason; the owner says why in the issue or pull request.
 
 ## Updates
 
-Users get a change to your theme only when the list's commit moves, after the owner has tested it: until then they keep the commit that was tested. Push your changes, then open an issue or pull request asking for the new commit to be listed, with new screenshots if it looks different and a new `version` if you use them. Users then see "Update" on its row.
-
-Don't rewrite the history of a listed commit: users who have it, and the list, need it to stay reachable.
+Once your theme is listed, its updates are yours, as with ES-DE's themes: whatever you push to its default branch reaches users the next time they press A on it in Download themes. Nobody reviews updates, so keeping the theme working is up to you: try changes before you push them (on a branch of their own while you work), and don't rewrite the default branch's history. A version a user's launcher can't load is refused there, and they keep the one they had. Open an issue or pull request for new screenshots, a new description or a new `version`.
 
 A theme that's no longer kept up is marked `deprecated` for a while, then taken off the list. Users who have it keep it.
 
@@ -87,9 +83,9 @@ A theme that's no longer kept up is marked `deprecated` for a while, then taken 
 
 Every pull request runs `.github/workflows/validate.yml`, which:
 
-1. Reads `themes.json`: format 1, every entry's keys, ids that are valid, unique and not a built-in theme's, https URLs, 40-character commits, and two to four screenshots per theme that exist in `screenshots/<id>/`, 16:9 and at least 1280 × 720.
+1. Reads `themes.json`: format 1, every entry's keys, ids that are valid, unique and not a built-in theme's, https URLs, and two to four screenshots per theme that exist in `screenshots/<id>/`, 16:9 and at least 1280 × 720.
 2. Builds the launcher's `odyssey-scrape` from its `main` branch and reads the list the way the launcher does (`odyssey-scrape --themes-list=. themes list`), failing on any warning.
-3. Installs each theme at its commit as the launcher does (`themes install <id>`), runs `inspect-theme --json` on it, and checks its `covers` match.
+3. Installs each theme from its default branch as the launcher does (`themes install <id>`), runs `inspect-theme --json` on it, and checks its `covers` match when it declares them.
 
 ## Trying a list locally
 
