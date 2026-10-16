@@ -1,0 +1,291 @@
+# Checks the theme list on every pull request (README.md, "The checks"):
+# 1. themes.json's entries and their screenshots, here;
+# 2. the list read as the launcher reads it, by odyssey-scrape built from the launcher's main branch;
+# 3. each theme installed at its commit as the launcher installs it, then inspect-theme on it, and its covers compared.
+# Linux is enough: odyssey-scrape's theme commands use no Windows API. Its file names are case-sensitive where the
+# launcher's on Windows aren't, so a theme that names a file in the wrong case fails here first.
+name: Validate the list
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_NOLOGO: "1"
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+    steps:
+      - name: Check out the list
+        uses: actions/checkout@v4
+        with:
+          path: list
+
+      - name: Check out the launcher
+        uses: actions/checkout@v4
+        with:
+          repository: GeekRhapsody/OdysseyLauncher
+          ref: main
+          path: launcher
+
+      - name: Install Pillow
+        run: python3 -m pip install --quiet pillow
+
+      - name: Check themes.json and its screenshots
+        working-directory: list
+        run: |
+          python3 - <<'PY'
+          import json, os, re, sys
+          from PIL import Image
+
+          errors = 0
+          def error(message):
+              global errors
+              errors += 1
+              print(f"::error file=themes.json::{message}")
+          def warning(message):
+              print(f"::warning file=themes.json::{message}")
+
+          # The launcher reads themes.json with comments and trailing commas allowed (System.Text.Json's Skip and
+          # AllowTrailingCommas): strip both, outside strings, keeping line breaks so a parse error's line is right.
+          def plain(text):
+              out, commas, i, n, in_string = [], [], 0, len(text), False
+              while i < n:
+                  c = text[i]
+                  if in_string:
+                      out.append(c)
+                      if c == "\\" and i + 1 < n:
+                          out.append(text[i + 1])
+                          i += 1
+                      elif c == '"':
+                          in_string = False
+                      i += 1
+                  elif c == '"':
+                      in_string = True
+                      out.append(c)
+                      i += 1
+                  elif text.startswith("//", i):
+                      end = text.find("\n", i)
+                      i = n if end < 0 else end
+                  elif text.startswith("/*", i):
+                      end = text.find("*/", i + 2)
+                      end = n if end < 0 else end + 2
+                      out.extend(ch if ch == "\n" else " " for ch in text[i:end])
+                      i = end
+                  else:
+                      if c == ",":
+                          commas.append(len(out))
+                      out.append(c)
+                      i += 1
+              for at in commas:
+                  following = at + 1
+                  while following < len(out) and out[following].isspace():
+                      following += 1
+                  if following < len(out) and out[following] in "}]":
+                      out[at] = " "
+              return "".join(out)
+
+          VERSION = re.compile(r"^\d+\.\d+(\.\d+)?(-[^+]+)?(\+.*)?$")
+          ID = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+          COMMIT = re.compile(r"^[0-9a-fA-F]{40}$")
+          TOP_KEYS = {"format", "latest_app_version", "themes"}
+          ENTRY_KEYS = {"id", "name", "author", "description", "url", "commit", "version", "min_app_version",
+                        "new", "deprecated", "covers", "screenshots"}
+          COVERS = {"system_cards": int, "templates": int, "menus": bool, "card_videos": bool, "game_videos": bool}
+          IMAGE_TYPES = (".webp", ".png", ".jpg", ".jpeg")
+
+          # The built-in themes' ids, which a listed theme may not take: the launcher's godot/themes/<id>/theme.toml.
+          themes_dir = "../launcher/godot/themes"
+          reserved = {d for d in os.listdir(themes_dir) if os.path.isfile(os.path.join(themes_dir, d, "theme.toml"))}
+
+          try:
+              with open("themes.json", encoding="utf-8") as f:
+                  text = plain(f.read())
+              index = json.loads(text)
+              # The last step reads this copy, without comments or trailing commas.
+              with open(os.path.join(os.environ.get("RUNNER_TEMP", "."), "themes.plain.json"), "w", encoding="utf-8") as f:
+                  f.write(text)
+          except (OSError, ValueError) as e:
+              error(f"can't be read: {e}")
+              sys.exit(1)
+
+          if not isinstance(index, dict):
+              error("isn't a JSON object")
+              sys.exit(1)
+          for key in index.keys() - TOP_KEYS:
+              error(f"unknown key '{key}'")
+          if index.get("format") != 1:
+              error(f"format must be 1, not {index.get('format')!r}")
+          latest = index.get("latest_app_version")
+          if latest is not None and not (isinstance(latest, str) and VERSION.match(latest)):
+              error(f"latest_app_version {latest!r} isn't a version")
+          with open("../launcher/Directory.Build.props", encoding="utf-8") as f:
+              launcher = re.search(r"<Version>([^<]+)</Version>", f.read())
+          if launcher and latest != launcher.group(1):
+              warning(f"latest_app_version is {latest!r}, the launcher's main branch is {launcher.group(1)}")
+
+          themes = index.get("themes")
+          if not isinstance(themes, list):
+              error("themes must be an array")
+              themes = []
+          seen, referenced = set(), set()
+          for i, entry in enumerate(themes):
+              where = f"themes[{i}]"
+              if not isinstance(entry, dict):
+                  error(f"{where} isn't an object")
+                  continue
+              theme_id = entry.get("id")
+              if isinstance(theme_id, str):
+                  where = f"{where} ('{theme_id}')"
+              for key in entry.keys() - ENTRY_KEYS:
+                  error(f"{where}: unknown key '{key}'")
+              if not (isinstance(theme_id, str) and ID.match(theme_id)):
+                  error(f"{where}: the id must be lower-case letters, digits, '_' and '-'")
+                  theme_id = None
+              elif theme_id in reserved:
+                  error(f"{where}: '{theme_id}' is a built-in theme's id")
+              elif theme_id in seen:
+                  error(f"{where}: '{theme_id}' is listed twice")
+              seen.add(theme_id)
+              for key in ("name", "author", "description"):
+                  if not (isinstance(entry.get(key), str) and entry[key].strip()):
+                      error(f"{where}: {key} is missing or empty")
+              for key in ("version",):
+                  if key in entry and not isinstance(entry[key], str):
+                      error(f"{where}: {key} must be a string")
+              url = entry.get("url")
+              if not (isinstance(url, str) and url.startswith("https://") and len(url) > len("https://")):
+                  error(f"{where}: url must be an https URL")
+              if not (isinstance(entry.get("commit"), str) and COMMIT.match(entry["commit"])):
+                  error(f"{where}: commit must be a full 40-character sha")
+              minimum = entry.get("min_app_version")
+              if minimum is not None and not (isinstance(minimum, str) and VERSION.match(minimum)):
+                  error(f"{where}: min_app_version {minimum!r} isn't a version")
+              for key in ("new", "deprecated"):
+                  if key in entry and not isinstance(entry[key], bool):
+                      error(f"{where}: {key} must be true or false")
+              covers = entry.get("covers")
+              if covers is not None:
+                  if not isinstance(covers, dict) or covers.keys() != COVERS.keys() or any(
+                          type(covers[k]) is not t for k, t in COVERS.items()):
+                      error(f"{where}: covers must have " + ", ".join(COVERS) + " (as inspect-theme --json prints it)")
+
+              shots = entry.get("screenshots")
+              if not isinstance(shots, list) or not 2 <= len(shots) <= 4:
+                  error(f"{where}: give two to four screenshots")
+                  shots = shots if isinstance(shots, list) else []
+              for shot in shots:
+                  if not (isinstance(shot, dict) and isinstance(shot.get("image"), str)
+                          and isinstance(shot.get("caption"), str) and shot["caption"].strip()):
+                      error(f"{where}: a screenshot needs an image and a caption")
+                      continue
+                  image = shot["image"]
+                  parts = [p for p in re.split(r"[/\\]+", image) if p]
+                  if theme_id is None or len(parts) != 3 or parts[:2] != ["screenshots", theme_id] \
+                          or not parts[2].lower().endswith(IMAGE_TYPES):
+                      error(f"{where}: '{image}' must be a WebP, PNG or JPEG in screenshots/{theme_id}/")
+                      continue
+                  path = "/".join(parts)
+                  referenced.add(path)
+                  if not os.path.isfile(path):
+                      error(f"{where}: {path} doesn't exist (names are case-sensitive)")
+                      continue
+                  try:
+                      with Image.open(path) as picture:
+                          width, height = picture.size
+                  except Exception as e:
+                      error(f"{where}: {path} can't be read as an image: {e}")
+                      continue
+                  if abs(width * 9 - height * 16) > width * 9 // 100:
+                      error(f"{where}: {path} is {width} x {height}, not 16:9")
+                  elif width < 1280:
+                      error(f"{where}: {path} is {width} x {height}: give at least 1280 x 720")
+                  if os.path.getsize(path) > 1024 * 1024:
+                      warning(f"{where}: {path} is over 1 MB: WebP is smaller")
+
+          for root, _, files in os.walk("screenshots"):
+              for name in files:
+                  path = os.path.join(root, name).replace(os.sep, "/")
+                  if path not in referenced:
+                      warning(f"{path} isn't any theme's screenshot")
+
+          print(f"{len(themes)} theme(s), {errors} error(s).")
+          sys.exit(1 if errors else 0)
+          PY
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: launcher/global.json
+
+      - name: Build odyssey-scrape
+        run: dotnet build launcher/tools/scrape-cli/scrape-cli.csproj -c Debug
+
+      - name: Read the list as the launcher does
+        working-directory: list
+        run: |
+          cli="$GITHUB_WORKSPACE/launcher/tools/scrape-cli/bin/Debug/net8.0/odyssey-scrape.dll"
+          dotnet "$cli" "--user-dir=$RUNNER_TEMP/user" --themes-list=. themes list 2> "$RUNNER_TEMP/list.err"
+          # The CLI writes the list's problems (a bad entry is left out with a warning) to stderr, and nothing else.
+          if [ -s "$RUNNER_TEMP/list.err" ]; then
+            while IFS= read -r line; do echo "::error file=themes.json::$line"; done < "$RUNNER_TEMP/list.err"
+            exit 1
+          fi
+
+      - name: Install and inspect each theme
+        working-directory: list
+        run: |
+          python3 - <<'PY'
+          import json, os, subprocess, sys
+
+          cli = os.path.join(os.environ["GITHUB_WORKSPACE"], "launcher/tools/scrape-cli/bin/Debug/net8.0/odyssey-scrape.dll")
+          user = os.path.join(os.environ["RUNNER_TEMP"], "user")
+
+          # The first step's copy of themes.json, without comments or trailing commas.
+          with open(os.path.join(os.environ["RUNNER_TEMP"], "themes.plain.json"), encoding="utf-8") as f:
+              themes = json.load(f)["themes"]
+
+          def run(*arguments):
+              result = subprocess.run(["dotnet", cli, f"--user-dir={user}", "--themes-list=.", *arguments],
+                                      capture_output=True, text=True)
+              print(result.stdout, end="")
+              print(result.stderr, end="", file=sys.stderr)
+              return result
+
+          failed = 0
+          for entry in themes:
+              theme_id = entry["id"]
+              print(f"::group::{theme_id} at {entry['commit']}")
+              installed = run("themes", "install", theme_id)
+              folder = os.path.join(user, "themes", theme_id)
+              if installed.returncode != 0 or not os.path.isfile(os.path.join(folder, "theme.toml")):
+                  print(f"::error file=themes.json::{theme_id}: couldn't be installed from {entry['url']} at {entry['commit']}")
+                  failed += 1
+                  print("::endgroup::")
+                  continue
+              inspected = run("inspect-theme", "--json", folder)
+              if inspected.returncode != 0:
+                  print(f"::error file=themes.json::{theme_id}: inspect-theme found errors (see its output)")
+                  failed += 1
+              start = inspected.stdout.find('"covers": ')
+              covers = None
+              if start >= 0:
+                  covers, _ = json.JSONDecoder().raw_decode(inspected.stdout[start + len('"covers": '):])
+              if covers is not None and "covers" in entry and entry["covers"] != covers:
+                  print(f"::error file=themes.json::{theme_id}: covers is {json.dumps(entry['covers'])}, "
+                        f"but inspect-theme counts {json.dumps(covers)}")
+                  failed += 1
+              elif covers is not None and "covers" not in entry:
+                  print(f"::notice file=themes.json::{theme_id} has no covers: inspect-theme counts \"covers\": {json.dumps(covers)}")
+              print("::endgroup::")
+
+          print(f"{len(themes)} theme(s) installed and inspected, {failed} problem(s).")
+          sys.exit(1 if failed else 0)
+          PY
