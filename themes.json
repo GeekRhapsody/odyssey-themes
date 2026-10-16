@@ -10,7 +10,7 @@
       "url": "https://github.com/GeekRhapsody/odyssey-vita.git",
       "version": "1.0.0",
       "new": true,
-      "covers": { "system_cards": 171, "templates": 0, "menus": true, "card_videos": false, "game_videos": false },
+      "covers": { "system_cards": 170, "templates": 0, "menus": true, "card_videos": false, "game_videos": false },
       "screenshots": [
         { "image": "screenshots/odyssey-vita/01.webp", "caption": "Systems" },
         { "image": "screenshots/odyssey-vita/02.webp", "caption": "PlayStation 2's games" },
